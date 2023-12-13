@@ -62,8 +62,9 @@ jobs:
             git reset --hard upstream/$DEFAULT_BRANCH
             git checkout origin/home .
 
-            # Remove the original Docker workflow
+            # Remove the original Docker workflows
             rm ./.github/workflows/docker-image-build-push.yml
+            rm ./.github/workflows/build-and-deploy.yml
 
             git add .
             git commit -m "chore: README and CI changes"
