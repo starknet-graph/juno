@@ -340,6 +340,10 @@ func (b *Blockchain) Store(block *core.Block, blockCommitments *core.BlockCommit
 		if err := verifyBlock(txn, block); err != nil {
 			return err
 		}
+
+		// TODO: add runtime option to toggle this on and off
+		PrintFirehoseLogs(block)
+
 		if err := core.NewState(txn).Update(block.Number, stateUpdate, newClasses); err != nil {
 			return err
 		}
@@ -371,6 +375,46 @@ func (b *Blockchain) Store(block *core.Block, blockCommitments *core.BlockCommit
 		heightBin := core.MarshalBlockNumber(block.Number)
 		return txn.Set(db.ChainHeight.Key(), heightBin)
 	})
+}
+
+// Firehose integration
+func PrintFirehoseLogs(block *core.Block) {
+	fmt.Printf("FIRE BLOCK_BEGIN %d\n", block.Number)
+	for indTx, tx := range block.Transactions {
+		fmt.Printf("FIRE BEGIN_TRX 0x%X ", tx.Hash().Bytes())
+		switch tx.(type) {
+		case *core.DeployTransaction:
+			fmt.Println("DEPLOY")
+		case *core.InvokeTransaction:
+			fmt.Println("INVOKE_FUNCTION")
+		case *core.DeclareTransaction:
+			fmt.Println("DECLARE")
+		case *core.DeployAccountTransaction:
+			fmt.Println("DEPLOY_ACCOUNT")
+		case *core.L1HandlerTransaction:
+			fmt.Println("L1_HANDLER")
+		default:
+			panic("not a transaction")
+		}
+		receipt := block.Receipts[indTx]
+		for indEvent, event := range receipt.Events {
+			fmt.Printf("FIRE TRX_BEGIN_EVENT 0x%X 0x%X\n", tx.Hash().Bytes(), event.From.Bytes())
+
+			for _, key := range event.Keys {
+				fmt.Printf("FIRE TRX_EVENT_KEY 0x%X %d 0x%X\n", tx.Hash().Bytes(), indEvent, key.Bytes())
+			}
+
+			for _, data := range event.Data {
+				fmt.Printf("FIRE TRX_EVENT_DATA 0x%X %d 0x%X\n", tx.Hash().Bytes(), indEvent, data.Bytes())
+			}
+		}
+	}
+	fmt.Printf("FIRE BLOCK_END %d 0x%X 0x%X %d %d\n",
+		block.Number,
+		block.Hash.Bytes(),
+		block.ParentHash.Bytes(),
+		block.Timestamp,
+		len(block.Transactions))
 }
 
 // VerifyBlock assumes the block has already been sanity-checked.
