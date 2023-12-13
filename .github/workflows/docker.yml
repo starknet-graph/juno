@@ -1,0 +1,123 @@
+name: "Build multi-arch images"
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+jobs:
+  image-info:
+    name: "Extract crate info"
+    runs-on: "ubuntu-latest"
+    outputs:
+      version: ${{ steps.derive.outputs.version }}
+
+    steps:
+      - id: "derive"
+        name: "Derive image info from Git tag"
+        run: |
+          FULL_REF="${{ github.ref }}"
+          REGEX="^refs\/tags\/v(.*)$"
+          [[ $FULL_REF =~ $REGEX ]];
+
+          echo "version=${BASH_REMATCH[1]}" >> $GITHUB_OUTPUT
+
+  build-amd64:
+    name: "Build for linux/amd64"
+    runs-on: "ubuntu-latest"
+    needs:
+      - "image-info"
+
+    env:
+      DOCKER_REPOSITORY: "starknet/juno-firehose"
+
+    steps:
+      - name: "Checkout"
+        uses: "actions/checkout@v3"
+
+      - name: "Login to Docker Hub"
+        uses: "docker/login-action@v1.6.0"
+        with:
+          username: "${{ secrets.DOCKER_HUB_USERNAME }}"
+          password: "${{ secrets.DOCKER_HUB_PASSWORD }}"
+
+      - name: "Build Docker image"
+        run: |
+          docker buildx build \
+            --platform "linux/amd64" \
+            -t ${DOCKER_REPOSITORY}:${{ needs.image-info.outputs.version }}-amd64 -f ./Dockerfile .
+
+      - name: "Push Docker image"
+        run: |
+          docker push ${DOCKER_REPOSITORY}:${{ needs.image-info.outputs.version }}-amd64
+
+  build-arm64:
+    name: "Build for linux/arm64"
+    runs-on: "ubuntu-latest"
+    needs:
+      - "image-info"
+
+    env:
+      DOCKER_REPOSITORY: "starknet/juno-firehose"
+
+    steps:
+      - name: "Checkout"
+        uses: "actions/checkout@v3"
+
+      - name: "Login to Docker Hub"
+        uses: "docker/login-action@v1.6.0"
+        with:
+          username: "${{ secrets.DOCKER_HUB_USERNAME }}"
+          password: "${{ secrets.DOCKER_HUB_PASSWORD }}"
+
+      - name: "Set up Docker Buildx"
+        run: |
+          docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
+          sudo systemctl restart docker
+          docker buildx create --name multi_builder
+          docker buildx use multi_builder
+
+      - name: "Build Docker image"
+        run: |
+          docker buildx build \
+            --platform "linux/arm64/v8" \
+            --output=type=docker \
+            -t ${DOCKER_REPOSITORY}:${{ needs.image-info.outputs.version }}-arm64 -f ./Dockerfile .
+
+      - name: "Push Docker image"
+        run: |
+          docker push ${DOCKER_REPOSITORY}:${{ needs.image-info.outputs.version }}-arm64
+
+  push:
+    name: "Push multi-arch manifest"
+    runs-on: "ubuntu-latest"
+    needs:
+      - "build-amd64"
+      - "build-arm64"
+      - "image-info"
+
+    env:
+      DOCKER_REPOSITORY: "starknet/juno-firehose"
+
+    steps:
+      - name: "Login to Docker Hub"
+        uses: "docker/login-action@v1.6.0"
+        with:
+          username: "${{ secrets.DOCKER_HUB_USERNAME }}"
+          password: "${{ secrets.DOCKER_HUB_PASSWORD }}"
+
+      - name: "Pull Docker images"
+        run: |
+          docker pull ${DOCKER_REPOSITORY}:${{ needs.image-info.outputs.version }}-amd64
+          docker pull ${DOCKER_REPOSITORY}:${{ needs.image-info.outputs.version }}-arm64
+
+      - name: "Push Docker image"
+        run: |
+          docker manifest create ${DOCKER_REPOSITORY}:${{ needs.image-info.outputs.version }} \
+            ${DOCKER_REPOSITORY}:${{ needs.image-info.outputs.version }}-amd64 \
+            ${DOCKER_REPOSITORY}:${{ needs.image-info.outputs.version }}-arm64
+          docker manifest create ${DOCKER_REPOSITORY}:latest \
+            ${DOCKER_REPOSITORY}:${{ needs.image-info.outputs.version }}-amd64 \
+            ${DOCKER_REPOSITORY}:${{ needs.image-info.outputs.version }}-arm64
+          docker manifest push ${DOCKER_REPOSITORY}:${{ needs.image-info.outputs.version }}
+          docker manifest push ${DOCKER_REPOSITORY}:latest
