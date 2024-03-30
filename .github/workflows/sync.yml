@@ -74,6 +74,10 @@ jobs:
             COMMIT_COUNT=$(git rev-list $MERGE_BASE..origin/$DEFAULT_BRANCH | wc -l)
             git cherry-pick origin/$DEFAULT_BRANCH~$(($COMMIT_COUNT-1))..origin/$DEFAULT_BRANCH
 
+            # Install build dependency
+            sudo apt-get update
+            sudo apt-get install -y libjemalloc-dev
+
             # Makes sure the updated local branch builds
             make juno
 
